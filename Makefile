@@ -6,7 +6,7 @@ CFLAGS = -Wall -g
 all: Sniffer Spoofer Gateway
 
 Sniffer: Sniffer.o
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $^ -lpcap -o $@
 
 Spoofer: Spoofer.o
 	$(CC) $(CFLAGS) $^ -o $@
