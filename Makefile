@@ -9,10 +9,10 @@ Sniffer: Sniffer.o
 	$(CC) $(CFLAGS) $^ -lpcap -o $@
 
 Spoofer: Spoofer.o
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $^ -lpcap -o $@
 
 Gateway: Gateway.o
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $^ -lpcap -o $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $<
