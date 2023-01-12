@@ -1,6 +1,6 @@
 /*
- *  Communication and Computing Course Assigment 5:
- *  Sniffer and Spoofer
+ *  Communication and Computing Course Assigment 5 Task A:
+ *  Sniffer Application for TCP connections of Calculator APP
  *  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky
  *  
  *  This program is free software: you can redistribute it and/or modify
@@ -28,17 +28,25 @@
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
+#include <time.h>
 
 #define CAL_HDRLEN 12
 #define CAL_MAXSIZE 8180
 
-typedef struct calculatorPacket {
+struct calculatorPacket
+{
     uint32_t unixtime;
     uint16_t length;
-    uint16_t reserved:3,c_flag:1,s_flag:1,t_flag:1,status:10;
+
+    union
+    {
+        uint16_t flags;
+        uint16_t _:3, c_flag:1, s_flag:1, t_flag:1, status:10;
+    };
+    
     uint16_t cache;
-    uint16_t padding;
-} cpack, *pcpack;
+    uint16_t __;
+};
 
 void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
 
@@ -52,6 +60,11 @@ int main() {
     char filter_exp[] = "tcp";
 
     bpf_u_int32 subnet_mask, ip;
+
+    printf("    Sniffer Application;  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky\n"
+            "This program comes with ABSOLUTELY NO WARRANTY.\n"
+            "This is free software, and you are welcome to redistribute it\n"
+            "under certain conditions; see `LICENSE' for details.\n");
 
     if (pcap_lookupnet(dev, &ip, &subnet_mask, error_buffer) == -1)
     {
@@ -76,7 +89,10 @@ int main() {
     {
         printf("Error setting filter - %s\n", pcap_geterr(handle));
         exit(1);
-    }                       
+    }
+
+    printf("Listening to interface \"%s\" with filter \"%s\"...\n", dev, filter_exp);
+    printf("----------------------------------------------------------\n");
 
     pcap_loop(handle, -1, packetSniffer, NULL);                
 
@@ -85,17 +101,8 @@ int main() {
     return 0;
 }
 
-void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
-    static struct ethhdr* ethheader = NULL;
-    static struct iphdr* iph = NULL;
-    static struct tcphdr* tcph = NULL;
-    static struct calculatorPacket* packdata = NULL;
-
-    static uint16_t iphdr_size = 0, tcphdrlen = 0, srcport = 0, dstport = 0, totalhdrsize = 0, dlength = 0, scode = 0;
-
-    static char sAddr[INET_ADDRSTRLEN] = { 0 }, dAddr[INET_ADDRSTRLEN] = { 0 };
-
-    static char* TCP_flags[6] = {
+void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {    
+    static const char* TCP_flags[6] = {
         "FIN",
         "SYN",
         "RST",
@@ -104,86 +111,204 @@ void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char 
         "URG"
     };
 
-    ethheader = (struct ethhdr*)packet;
-    
-    if (ntohs(ethheader->h_proto) == ETH_P_IP)
+    struct ethhdr* ethheader = (struct ethhdr*)packet;
+
+    if (ntohs(ethheader->h_proto) != ETH_P_IP)
+        return;
+
+    struct iphdr* iph = (struct iphdr*)(packet + sizeof(struct ethhdr));
+
+    if (iph->protocol != IPPROTO_TCP)
+        return;
+
+    struct tcphdr* tcph = (struct tcphdr*)(packet + sizeof(struct ethhdr) + iph->ihl*4);
+
+    struct calculatorPacket* packdata = (struct calculatorPacket *)(packet + sizeof(struct ethhdr) + iph->ihl*4 + tcph->doff*4);
+
+    struct tm ts;
+
+    char sAddr[INET_ADDRSTRLEN] = { 0 }, dAddr[INET_ADDRSTRLEN] = { 0 }, buf[80] = { 0 };
+
+    char* CalcData = NULL;
+
+    static uint64_t frame = 0;
+
+    time_t tt;
+
+    uint32_t utime;
+
+    uint16_t srcport, dstport, dlength, c_flag, s_flag, t_flag, scode, cachecontrol;
+
+    FILE *fp = NULL;
+
+    fp = fopen("log.txt", "a");
+
+    if (fp == NULL)
     {
-        iph = (struct iphdr*)(packet + sizeof(struct ethhdr));
-
-        if (iph->protocol == IPPROTO_TCP)
-        {
-            iphdr_size = iph->ihl*4;
-
-            tcph = (struct tcphdr*)(packet + iphdr_size + sizeof(struct ethhdr));
-
-            inet_ntop(AF_INET, &(iph->saddr), sAddr, INET_ADDRSTRLEN);
-            inet_ntop(AF_INET, &(iph->daddr), dAddr, INET_ADDRSTRLEN);
-
-            tcphdrlen = tcph->doff*4;
-            srcport = ntohs(tcph->th_sport);
-            dstport = ntohs(tcph->th_dport);
-
-            printf("----------------------------------\n");
-            printf("Sniffed TCP packet:\n\n");
-            printf("(*) Source IP Address: %s\n"
-            "(*) Destenation IP Address: %s\n"
-            "(*) Source Port: %hu\n"
-            "(*) Destenation Port: %hu\n"
-            "(*) TCP Flags:", 
-             sAddr, 
-             dAddr, 
-             srcport, 
-             dstport
-            );
-
-            for (int i = 0; i < 6; ++i)
-            {
-                if (tcph->th_flags & (1<<i))
-                    printf(" %s", TCP_flags[i]);
-            }
-            
-            printf("\n\n");
-
-            if ((tcph->th_flags & TH_PUSH) != TH_PUSH)
-                return;
-
-            totalhdrsize = sizeof(struct ethhdr) + iphdr_size + tcphdrlen;
-                
-            packdata = (struct calculatorPacket*)(packet + totalhdrsize);
-            dlength = ntohs(packdata->length);
-            scode = (packdata->status)>>2;
-
-            char CalcData[dlength];
-
-            memcpy(CalcData, (packet + totalhdrsize + CAL_HDRLEN), dlength);
-
-            printf("TCP Payload:\n");
-            printf("(*) Timestamp: %u\n"
-            "(*) Total length: %hu\n"
-            "(*) Cache flag: %hu\n"
-            "(*) Steps flag: %hu\n"
-            "(*) Type flag: %hu\n"
-            "(*) status code: %hu\n"
-            "(*) Cache control: %hu\n",
-             ntohl(packdata->unixtime),
-             dlength,
-             packdata->c_flag,
-             packdata->s_flag,
-             packdata->t_flag,
-             scode,
-             ntohs(packdata->cache)
-            );
-
-            printf("(*) Data:");
-            for (int i = 0; i < dlength; ++i)
-            {
-                if (!(i&15)) 
-                    printf("\n%04X:  ", i);
-
-                printf("%02X ",((unsigned char*)CalcData)[i]);
-            }
-
-            printf("\n");
-        }
+        perror("fopen");
+        exit(errno);
     }
+
+    inet_ntop(AF_INET, &(iph->saddr), sAddr, INET_ADDRSTRLEN);
+    inet_ntop(AF_INET, &(iph->daddr), dAddr, INET_ADDRSTRLEN);
+
+    srcport = ntohs(tcph->source);
+    dstport = ntohs(tcph->dest);
+
+    printf("------------------\tFRAME %ld \t------------------\n", (++frame));
+    printf("(*) Total Frame Size: %lu bytes\n", (sizeof(struct ethhdr) + ntohs(iph->tot_len)));
+    printf("------------------\tETH HEADER\t------------------\n");
+    printf("(*) Source MAC Address: ");
+
+    for (int i = 0; i < ETH_ALEN; ++i)
+        printf("%02x%c", ethheader->h_source[i], (i == (ETH_ALEN - 1) ? '\n':':'));
+
+    printf("(*) Destenation MAC Address: ");
+
+    for (int i = 0; i < ETH_ALEN; ++i)
+        printf("%02x%c", ethheader->h_dest[i], (i == (ETH_ALEN - 1) ? '\n':':'));
+
+    printf("(*) Protocol: Internet Protocol\n");
+
+    printf("------------------\tIP HEADER \t------------------\n");
+    printf("(*) Version: %hu\n"
+            "(*) Header Length: %hu bytes\n"
+            "(*) Type-Of-Service (TOS): %hu\n"
+            "(*) Total Length: %hu bytes\n"
+            "(*) Identification : %hu\n"
+            "(*) Fragment Offset: %hu\n"
+            "(*) Time-To-Live (TTL): %hu\n"
+            "(*) Protocol: %hu\n"
+            "(*) Header checksum: %hu\n"
+            "(*) Source IP Address: %s\n"
+            "(*) Destenation IP Address: %s\n",
+            iph->version,
+            iph->ihl*4,
+            iph->tos,
+            ntohs(iph->tot_len),
+            iph->id,
+            iph->frag_off,
+            iph->ttl,
+            iph->protocol,
+            iph->check,
+            sAddr,
+            dAddr
+    );
+
+    printf("------------------\tTCP HEADER\t------------------\n");
+    printf("(*) Source Port: %hu\n"
+           "(*) Destenation Port: %hu\n"
+           "(*) Sequence Number: %u\n"
+           "(*) Acknowledgment Number: %u\n"
+           "(*) Header Length: %hu bytes\n"
+           "(*) TCP Flags:",
+           srcport,
+           dstport,
+           ntohl(tcph->th_seq),
+           ntohl(tcph->th_ack),
+           tcph->doff*4
+    );
+
+    for (int i = 0; i < 6; ++i)
+    {
+        if (tcph->th_flags & (1 << i))
+            printf(" %s", TCP_flags[i]);
+    }
+
+    printf("\n");
+    
+    printf("(*) Window Size: %hu bytes\n"
+           "(*) Checksum: %hu\n"
+           "(*) Urgent pointer: %hu\n",
+           ntohs(tcph->th_win),
+           ntohs(tcph->th_sum),
+           ntohs(tcph->th_urp)
+    );
+
+    if ((tcph->th_flags & TH_PUSH) != TH_PUSH)
+    {
+        printf("----------------------------------------------------------\n");
+        return;
+    }
+
+    utime = ntohl(packdata->unixtime);
+    dlength = ntohs(packdata->length);
+    packdata->flags = ntohs(packdata->flags);
+    c_flag = (((packdata->flags) >> 12) & 1);
+    s_flag = (((packdata->flags) >> 11) & 1);
+    t_flag = (((packdata->flags) >> 10) & 1);
+    scode = packdata->status;
+    cachecontrol = ntohs(packdata->cache);
+
+    CalcData = malloc(dlength * sizeof(uint8_t));
+
+    if (CalcData == NULL)
+    {
+        perror("malloc");
+        exit(errno);
+    }
+    
+    memcpy(CalcData, (packet + sizeof(struct ethhdr) + iph->ihl*4 + tcph->doff*4 + CAL_HDRLEN), dlength);
+
+    tt = utime;
+    ts = *localtime(&tt);
+    strftime(buf, sizeof(buf), "%a %d-%m-%Y %H:%M:%S", &ts);
+
+    printf("------------------\tAPP HEADER\t------------------\n");
+    printf("(*) Timestamp: %u (%s)\n"
+           "(*) Total Length: %hu bytes\n"
+           "(*) Cache Flag: %hu\n"
+           "(*) Steps Flag: %hu\n"
+           "(*) Type Flag: %hu\n"
+           "(*) Status Code: %hu\n"
+           "(*) Cache Control: %hu\n",
+           utime,
+           buf,
+           dlength,
+           c_flag,
+           s_flag,
+           t_flag,
+           scode,
+           cachecontrol);
+
+    printf("------------------\tPAYLOAD\t\t------------------\n");
+    for (int i = 0; i < dlength; ++i)
+    {
+        if (!(i & 15))
+            printf("\n%04X:  ", i);
+
+        printf("%02X ", ((unsigned char *)CalcData)[i]);
+    }
+
+    printf("\n----------------------------------------------------------\n");
+
+    fprintf(fp, "source_ip: %s, dest_ip: %s, source_port: %hu, "
+                "dest_port: %hu, timestamp: %u, total_length: %hu cache_flag: %hu, "
+                "steps_flag: %hu, type_flag: %hu, status_code: %u, cache_control: %hu, "
+                "data: ",
+                sAddr,
+                dAddr,
+                srcport,
+                dstport,
+                utime,
+                dlength,
+                c_flag,
+                s_flag,
+                t_flag,
+                scode,
+                cachecontrol
+    );
+
+    for (int i = 0; i < dlength; ++i)
+    {
+        if (!(i & 15))
+            fprintf(fp, "\n%04X:  ", i);
+
+        fprintf(fp, "%02X ", ((unsigned char *)CalcData)[i]);
+    }
+
+    fprintf(fp, "\n\n");
+
+    free(CalcData);
+    fclose(fp);
 }
