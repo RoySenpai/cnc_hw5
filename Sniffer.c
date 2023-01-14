@@ -33,6 +33,154 @@
 #define CAL_HDRLEN 12
 #define CAL_MAXSIZE 8180
 
+const char* IP_PROTOCOLS[145] = {
+    "IPv6 Hop-by-Hop Option",
+    "Internet Control Message Protocol",
+    "Internet Group Management Protocol",
+    "Gateway-to-Gateway Protocol",
+    "IP in IP",
+    "Internet Stream Protocol",
+    "Transmission Control Protocol",
+    "Core-based trees",
+    "Exterior Gateway Protocol",
+    "Interior Gateway Protocol",
+    "BBN RCC Monitoring",
+    "Network Voice Protocol",
+    "Xerox PUP",
+    "ARGUS",
+    "EMCON",
+    "Cross Net Debugger",
+    "Chaos",
+    "User Datagram Protocol",
+    "Multiplexing",
+    "DCN Measurement Subsystems",
+    "Host Monitoring Protocol",
+    "Packet Radio Measurement",
+    "XEROX NS IDP",
+    "Trunk-1",
+    "Trunk-2",
+    "Leaf-1",
+    "Leaf-2",
+    "Reliable Data Protocol",
+    "Internet Reliable Transaction Protocol",
+    "ISO Transport Protocol Class 4",
+    "Bulk Data Transfer Protocol",
+    "MFE Network Services Protocol",
+    "MERIT Internodal Protocol",
+    "Datagram Congestion Control Protocol",
+    "Third Party Connect Protocol",
+    "Inter-Domain Policy Routing Protocol",
+    "Xpress Transport Protocol",
+    "Datagram Delivery Protocol",
+    "IDPR Control Message Transport Protocol",
+    "TP++ Transport Protocol",
+    "IL Transport Protocol",
+    "IPv6 Encapsulation (6to4 and 6in4)",
+    "Source Demand Routing Protocol",
+    "Routing Header for IPv6",
+    "Fragment Header for IPv6",
+    "Inter-Domain Routing Protocol",
+    "Resource Reservation Protocol",
+    "Generic Routing Encapsulation",
+    "Dynamic Source Routing Protocol",
+    "Burroughs Network Architecture",
+    "Encapsulating Security Payload",
+    "Authentication Header",
+    "Integrated Net Layer Security Protocol",
+    "SwIPe",
+    "NBMA Address Resolution Protocol",
+    "IP Mobility",
+    "Transport Layer Security Protocol",
+    "Simple Key-Management for Internet Protocol",
+    "ICMP for IPv6",
+    "No Next Header for IPv6",
+    "Destination Options for IPv6",
+    "Any host internal protocol",
+    "CFTP",
+    "Any local network",
+    "SATNET and Backroom EXPAK",
+    "Kryptolan",
+    "MIT Remote Virtual Disk Protocol",
+    "Internet Pluribus Packet Core",
+    "Any distributed file system",
+    "SATNET Monitoring",
+    "VISA Protocol",
+    "Internet Packet Core Utility",
+    "Computer Protocol Network Executive",
+    "Computer Protocol Heart Beat",
+    "Wang Span Network",
+    "Packet Video Protocol",
+    "Backroom SATNET Monitoring",
+    "SUN ND PROTOCOL-Temporary",
+    "WIDEBAND Monitoring",
+    "WIDEBAND EXPAK",
+    "International Organization for Standardization Internet Protocol",
+    "Versatile Message Transaction Protocol",
+    "Secure Versatile Message Transaction Protocol",
+    "VINES",
+    "TTP",
+    "Internet Protocol Traffic Manager",
+    "NSFNET-IGP",
+    "Dissimilar Gateway Protocol",
+    "TCF",
+    "EIGRP",
+    "Open Shortest Path First",
+    "Sprite RPC Protocol",
+    "Locus Address Resolution Protocol",
+    "Multicast Transport Protocol",
+    "AX.25",
+    "KA9Q NOS compatible IP over IP tunneling",
+    "Mobile Internetworking Control Protocol",
+    "Semaphore Communications Sec. Pro",
+    "Ethernet-within-IP Encapsulation",
+    "Encapsulation Header",
+    "Any private encryption scheme",
+    "GMTP",
+    "Ipsilon Flow Management Protocol",
+    "PNNI over IP",
+    "Protocol Independent Multicast",
+    "Aggregate Route IP Switching Protocol",
+    "Space Communications Protocol Standards",
+    "QNX",
+    "Active Networks",
+    "IP Payload Compression Protocol",
+    "Sitara Networks Protocol",
+    "Compaq Peer Protocol",
+    "IPX in IP",
+    "Virtual Router Redundancy Protocol, Common Address Redundancy Protocol",
+    "PGM Reliable Transport Protocol",
+    "Any 0-hop protocol",
+    "Layer Two Tunneling Protocol Version 3",
+    "D-II Data Exchange",
+    "Interactive Agent Transfer Protocol",
+    "Schedule Transfer Protocol",
+    "SpectraLink Radio Protocol",
+    "Universal Transport Interface Protocol",
+    "Simple Message Protocol",
+    "Simple Multicast Protocol",
+    "Performance Transparency Protocol",
+    "Intermediate System to Intermediate System Protocol over IPv4",
+    "Flexible Intra-AS Routing Environment",
+    "Combat Radio Transport Protocol",
+    "Combat Radio User Datagram",
+    "Service-Specific Connection-Oriented Protocol in a Multilink and Connectionless Environment",
+    "IPLT",
+    "Secure Packet Shield",
+    "Private IP Encapsulation within IP",
+    "Stream Control Transmission Protocol",
+    "Fibre Channel",
+    "Reservation Protocol (RSVP) End-to-End Ignore",
+    "Mobility Extension Header for IPv6",
+    "Lightweight User Datagram Protocol",
+    "Multiprotocol Label Switching Encapsulated in IP",
+    "MANET Protocols",
+    "Host Identity Protocol",
+    "Site Multihoming by IPv6 Intermediation",
+    "Wrapped Encapsulating Security Payload",
+    "Robust Header Compression",
+    "IPv6 Segment Routing",
+};
+
 struct calculatorPacket
 {
     uint32_t unixtime;
@@ -178,7 +326,7 @@ void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char 
             "(*) Identification : %hu\n"
             "(*) Fragment Offset: %hu\n"
             "(*) Time-To-Live (TTL): %hu\n"
-            "(*) Protocol: %hu\n"
+            "(*) Protocol: %hu (%s)\n"
             "(*) Header checksum: %hu\n"
             "(*) Source IP Address: %s\n"
             "(*) Destenation IP Address: %s\n",
@@ -190,6 +338,7 @@ void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char 
             iph->frag_off,
             iph->ttl,
             iph->protocol,
+            IP_PROTOCOLS[iph->protocol],
             iph->check,
             sAddr,
             dAddr
@@ -275,9 +424,9 @@ void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char 
     for (int i = 0; i < dlength; ++i)
     {
         if (!(i & 15))
-            printf("\n%04X:  ", i);
+            printf("\n%04X: ", i);
 
-        printf("%02X ", ((unsigned char *)CalcData)[i]);
+        printf("%02X", ((unsigned char *)CalcData)[i]);
     }
 
     printf("\n----------------------------------------------------------\n");
@@ -285,7 +434,7 @@ void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char 
     fprintf(fp, "source_ip: %s, dest_ip: %s, source_port: %hu, "
                 "dest_port: %hu, timestamp: %u, total_length: %hu cache_flag: %hu, "
                 "steps_flag: %hu, type_flag: %hu, status_code: %u, cache_control: %hu, "
-                "data: ",
+                "data:",
                 sAddr,
                 dAddr,
                 srcport,
@@ -302,9 +451,9 @@ void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char 
     for (int i = 0; i < dlength; ++i)
     {
         if (!(i & 15))
-            fprintf(fp, "\n%04X:  ", i);
+            fprintf(fp, "\n%04X: ", i);
 
-        fprintf(fp, "%02X ", ((unsigned char *)CalcData)[i]);
+        fprintf(fp, "%02X", ((unsigned char *)CalcData)[i]);
     }
 
     fprintf(fp, "\n\n");
