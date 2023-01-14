@@ -178,7 +178,7 @@ const char* IP_PROTOCOLS[145] = {
     "Site Multihoming by IPv6 Intermediation",
     "Wrapped Encapsulating Security Payload",
     "Robust Header Compression",
-    "IPv6 Segment Routing",
+    "IPv6 Segment Routing"
 };
 
 struct calculatorPacket
