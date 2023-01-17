@@ -1,6 +1,6 @@
 /*
  *  Communication and Computing Course Assigment 5 Task B:
- *  SPoofer Application for ICMP packets
+ *  Spoofer Application for ICMP, TCP and UDP packets
  *  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky
  *
  *  This program is free software: you can redistribute it and/or modify

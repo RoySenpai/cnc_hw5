@@ -1,3 +1,22 @@
+/*
+ *  Communication and Computing Course Assigment 5 Task B:
+ *  Snoofer Application for ICMP packets
+ *  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
@@ -31,7 +50,7 @@ int main() {
 
     bpf_u_int32 subnet_mask, ip;
 
-    printf("    Snooper Application;  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky\n"
+    printf("    Snoofer Application;  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky\n"
             "This program comes with ABSOLUTELY NO WARRANTY.\n"
             "This is free software, and you are welcome to redistribute it\n"
             "under certain conditions; see `LICENSE' for details.\n");
