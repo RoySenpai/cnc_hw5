@@ -22,371 +22,279 @@
 #include <arpa/inet.h>
 #include <netinet/ip.h>
 #include <netinet/ip_icmp.h>
-#include <net/ethernet.h>
-#include <sys/socket.h>
-#include <pcap.h>
+#include <netinet/udp.h>
+#include <netinet/tcp.h>
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
 
-char* ICMP_TYPE_RESERVED = "RESERVED";
+#define INVALID_SOCKET -1
+#define PACKET_LEN 536
+#define MTU 1500
 
-const char* ICMP_TYPES[256] = {
-	"Echo Replay", 						/* 0 Echo reply (used to ping) */
+#define TYPE IPPROTO_TCP
 
-	/* 1 and 2 Reserved */
-	"", "",
+unsigned short calculate_tcp_checksum(struct ip *iph);
+unsigned short in_cksum(unsigned short *buf, int length);
+unsigned short csum(unsigned short *ptr,int nbytes);
+void send_raw_ip_packet(struct ip *iph);
+void spoofICMP();
+void spoofTCP();
+void spoofUDP();
 
-	"Destination Unreachable",			/* 3 */
-	"Source Quench", 					/* 4 Source quench (congestion control), deprecated */
-	"Redirect Message",					/* 5 */
-	"Alternate Host Address", 			/* 6 Deprecated */
-	"",						  			/* 7 Reserved */
-	"Echo Request",			  			/* 8 Echo request (used to ping) */
-	"Router Advertisement",				/* 9 Router Advertisement  */
-	"Router Solicitation",				/* 10 Router discovery/selection/solicitation */
-	"Time Exceeded",					/* 11 */
-	"Parameter Problem: Bad IP header", /* 12 */
-	"Timestamp", 						/* 13 */				
-	"Timestamp Reply",					/* 14 */
-	"Information Request",				/* 15 Deprecated */
-	"Information Reply",				/* 16 Deprecated */
-	"Address Mask Request",				/* 17 Deprecated */
-	"Address Mask Reply",				/* 18 Deprecated */
-	"",									/* 19 Reserved for security */
-
-	/* 20 through 29 Reserved for robustness experiment */
-	"", "", "", "", "", "", "", "", "", "", 
-
-	"Traceroute",						/* 30 Deprecated Information Request */
-	"Datagram Conversion Error",		/* 31 Deprecated */
-	"Mobile Host Redirect",				/* 32 Deprecated */
-	"Where-Are-You",					/* 33 Deprecated originally meant for IPv6 */
-	"Here-I-Am",						/* 34 Deprecated originally meant for IPv6 */
-	"Mobile Registration Request",		/* 35 Deprecated */
-	"Mobile Registration Reply",		/* 36 Deprecated */
-	"Domain Name Request",				/* 37 Deprecated */
-	"Domain Name Reply",				/* 38 Deprecated */
-	"SKIP",								/* 39 SKIP Algorithm Discovery Protocol, Simple Key-Management for Internet Protocol */
-	"Photuris",							/* 40 Photuris, Security failures */
-	"Experimental",						/* 41 ICMP for experimental mobility protocols such as Seamoby [RFC4065] */
-	"Extended Echo Request",			/* 42 Xping request */
-	"Extended Echo Reply",				/* 43 Xping replay */
-
-	/* 44 through 254 Reserved */
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-	"", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
-
-	"Experimental",						/* 253 RFC3692-style Experiment 1 (RFC 4727) */
-	"Experimental",						/* 254 RFC3692-style Experiment 2 (RFC 4727) */
-	""									/* 255 Reserved */
+struct pseudo_tcp
+{
+    unsigned saddr, daddr;
+    unsigned char mbz;
+    unsigned char ptcl;
+    unsigned short tcpl;
+    struct tcphdr tcp;
+    char payload[PACKET_LEN];
 };
 
-const char* ICMP_DEST_UNREACH_CODES[16] = {
-	"Destination network unreachable", "Destination host unreachable", "Destination protocol unreachable", "Destination port unreachable",
-	"Fragmentation required, and DF flag se", "Source route failed", "Destination network unknown", "Destination host unknown",
-	"Source host isolated", "Network administratively prohibited", "Host administratively prohibited", "Network unreachable for ToS",
-	"Host unreachable for ToS", "Communication administratively prohibited", "Host Precedence Violation", "Precedence cutoff in effect"
+struct pseudo_header
+{
+    u_int32_t source_address;
+    u_int32_t dest_address;
+    u_int8_t placeholder;
+    u_int8_t protocol;
+    u_int16_t udp_length;
 };
-
-const char* ICMP_REDIRECT_CODES[4] = {
-	"Redirect Datagram for the Network",
-	"Redirect Datagram for the Host",
-	"Redirect Datagram for the ToS & network",
-	"Redirect Datagram for the ToS & host"
-};
-
-const char* ICMP_PARAMETERPROB_CODES[3] = {
-	"Pointer indicates the error",
-	"Missing a required option",
-	"Bad length"
-};
-
-const char* ICMP_EXT_ECHOREPLY_CODES[5] = {
-	"No Error",
-	"Malformed Query",
-	"No Such Interface",
-	"No Such Table Entry",
-	"Multiple Interfaces Satisfy Query"
-};
-
-
-void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
-unsigned short calculate_checksum(unsigned short *paddress, int len);
 
 int main() {
-	pcap_t *handle;
 
-	char dev[] = "enp0s3";
-	char error_buffer[PCAP_ERRBUF_SIZE];
+  	printf("    Spoofer Application;  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky\n"
+		 "This program comes with ABSOLUTELY NO WARRANTY.\n"
+		 "This is free software, and you are welcome to redistribute it\n"
+		 "under certain conditions; see `LICENSE' for details.\n");
+    printf("----------------------------------------------------------\n");
 
-	bpf_u_int32 subnet_mask, ip;
-
-	printf("    Spoofer Application;  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky\n"
-		   "This program comes with ABSOLUTELY NO WARRANTY.\n"
-		   "This is free software, and you are welcome to redistribute it\n"
-		   "under certain conditions; see `LICENSE' for details.\n");
-
-	if (pcap_lookupnet(dev, &ip, &subnet_mask, error_buffer) == -1)
+	switch (TYPE)
 	{
-		printf("Could not get information for device: %s\n", dev);
-		ip = 0;
-		subnet_mask = 0;
-	}
-
-	handle = pcap_open_live(dev, BUFSIZ, 1, 1000, error_buffer);
-
-	if (handle == NULL)
-	{
-		printf("Could not open %s - %s\n", dev, error_buffer);
-		exit(1);
-	}
-
-	printf("Listening to interface \"%s\"...\n", dev);
-	printf("----------------------------------------------------------\n");
-
-	pcap_loop(handle, -1, packetSniffer, NULL);
-
-	pcap_close(handle);
-
-	return 0;
-}
-
-void send_raw_ip_packet(struct ip* ip);
-
-void sendSpoofPacket(const u_char *packet, struct iphdr* ip, struct icmphdr *icmph);
-
-void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
-	struct ethhdr *ethheader = (struct ethhdr *)packet;
-
-	if (ntohs(ethheader->h_proto) != ETH_P_IP)
-		return;
-
-	struct iphdr *iph = (struct iphdr *)(packet + sizeof(struct ethhdr));
-
-	if (iph->protocol != IPPROTO_ICMP)
-		return;
-
-	struct icmphdr *icmph = (struct icmphdr *)(packet + sizeof(struct ethhdr) + (iph->ihl * 4));
-
-	char sAddr[INET_ADDRSTRLEN] = {0}, dAddr[INET_ADDRSTRLEN] = {0};
-
-	static uint64_t frame = 0;
-
-	inet_ntop(AF_INET, &(iph->saddr), sAddr, INET_ADDRSTRLEN);
-	inet_ntop(AF_INET, &(iph->daddr), dAddr, INET_ADDRSTRLEN);
-
-	printf("------------------\tFRAME %ld \t------------------\n", (++frame));
-	printf("(*) Total Frame Size: %lu bytes\n", (sizeof(struct ethhdr) + ntohs(iph->tot_len)));
-	printf("------------------\tETH HEADER\t------------------\n");
-	printf("(*) Source MAC Address: ");
-
-	for (int i = 0; i < ETH_ALEN; ++i)
-		printf("%02x%c", ethheader->h_source[i], (i == (ETH_ALEN - 1) ? '\n' : ':'));
-
-	printf("(*) Destenation MAC Address: ");
-
-	for (int i = 0; i < ETH_ALEN; ++i)
-		printf("%02x%c", ethheader->h_dest[i], (i == (ETH_ALEN - 1) ? '\n' : ':'));
-
-	printf("(*) Protocol: Internet Protocol\n");
-
-	printf("------------------\tIP HEADER \t------------------\n");
-	printf("(*) Version: %hu\n"
-		   "(*) Header Length: %hu bytes\n"
-		   "(*) Type-Of-Service (TOS): %hu\n"
-		   "(*) Total Length: %hu bytes\n"
-		   "(*) Identification : %hu\n"
-		   "(*) Fragment Offset: %hu\n"
-		   "(*) Time-To-Live (TTL): %hu\n"
-		   "(*) Protocol: %hu\n"
-		   "(*) Header Checksum: %hu\n"
-		   "(*) Source IP Address: %s\n"
-		   "(*) Destenation IP Address: %s\n",
-		   iph->version,
-		   iph->ihl * 4,
-		   iph->tos,
-		   ntohs(iph->tot_len),
-		   iph->id,
-		   iph->frag_off,
-		   iph->ttl,
-		   iph->protocol,
-		   iph->check,
-		   sAddr,
-		   dAddr
-	);
-
-	printf("------------------\tICMP HEADER\t------------------\n");
-	printf("(*) Type: %hhu (%s)\n"
-		   "(*) Code: %hhu",
-		   icmph->type,
-		   ICMP_TYPES[icmph->type],
-		   icmph->code
-	);
-
-	switch(icmph->type)
-	{
-		case ICMP_DEST_UNREACH:
+		case IPPROTO_TCP:
 		{
-			printf(" (%s)\n", ICMP_DEST_UNREACH_CODES[icmph->code]);
+			printf("Spoofing TCP packet...\n");
+			spoofTCP();
 			break;
 		}
 
-		case ICMP_PARAMETERPROB:
+		case IPPROTO_UDP:
 		{
-			printf(" (%s)\n", ICMP_PARAMETERPROB_CODES[icmph->code]);
+			printf("Spoofing UDP packet...\n");
+			spoofUDP();
 			break;
 		}
 
-		case ICMP_EXT_ECHOREPLY:
+		case IPPROTO_ICMP:
 		{
-			printf(" (%s)\n", ICMP_EXT_ECHOREPLY_CODES[icmph->code]);
+			printf("Spoofing ICMP packet...\n");
+			spoofICMP();
 			break;
 		}
 
 		default:
 		{
-			printf("\n");
+			printf("Unsupported protocol.\n");
 			break;
 		}
 	}
 
-	printf("(*) Checksum: %hu\n", ntohs(icmph->checksum));
-
-	if (icmph->type == ICMP_ECHO || icmph->type == ICMP_ECHOREPLY)
-	{
-		printf("(*) Identifier: %hu\n"
-			   "(*) Sequence Number: %hu\n",
-			   ntohs(icmph->un.echo.id),
-			   ntohs(icmph->un.echo.sequence)
-		);
-
-
-		//if (icmph->type == ICMP_ECHOREPLY)
-		//{
-
-			printf("------------------\tSPOOFING\t------------------\n");
-			printf("Spoofing and sending...\n");
-			sendSpoofPacket((packet + sizeof(struct ethhdr)), iph, icmph);
-		//}
-	}
-
+	return 0;
 }
 
-void sendSpoofPacket(const u_char *packet, struct iphdr* ip, struct icmphdr *icmph) {
-	struct ip *iptosend;
-	struct icmphdr *icmptosend;
-	struct in_addr saddr;
-	struct in_addr daddr;
-	unsigned short plen = ntohs(ip->tot_len) - ip->ihl*4 - sizeof(struct icmphdr);
+void spoofICMP() {
+	struct ip *iph = NULL;
+	struct icmphdr *icmp = NULL;
+	char buffer[MTU] = {0};
+	char *msg = "SHUT UP";
+	int msglen = (strlen(msg) + 1);
 
-	u_char bufferToSend[1500] = { 0 };
+	memcpy(buffer + sizeof(struct ip) + sizeof(struct icmphdr), msg, msglen);
 
-	iptosend = (struct ip*)bufferToSend;
-	iptosend->ip_v = ip->version;
-	iptosend->ip_hl = 5;
-	iptosend->ip_ttl = 20;
-	iptosend->ip_p = IPPROTO_ICMP; 
-	iptosend->ip_len = htons(sizeof(struct ip) + sizeof(struct icmphdr));
+	icmp = (struct icmphdr *)(buffer + sizeof(struct ip));
+	icmp->type = ICMP_ECHO;
+	icmp->code = 0;
+	icmp->un.echo.id = 1332;
+	icmp->un.echo.sequence = 420;
+	icmp->checksum = 0;
+	icmp->checksum = in_cksum((unsigned short *)icmp, sizeof(struct icmphdr) + msglen);
 
-	icmptosend = (struct icmphdr*)(bufferToSend + sizeof(struct ip));
-	
-	icmptosend->type = icmph->type;
-	icmptosend->code = icmph->code;
-	icmptosend->un.echo.id = icmph->un.echo.id;
-	icmptosend->un.echo.sequence = icmph->un.echo.sequence;
+	iph = (struct ip *)buffer;
+	iph->ip_v = 4;
+	iph->ip_hl = 5;
+	iph->ip_ttl = 69;
+	iph->ip_src.s_addr = inet_addr("8.8.8.8");
+	iph->ip_dst.s_addr = inet_addr("10.0.2.15");
+	iph->ip_p = IPPROTO_ICMP;
+	iph->ip_len = htons(sizeof(struct ip) + sizeof(struct icmphdr) + msglen + 69);
 
-	if (icmph->type == ICMP_ECHO)
-	{
-		printf("Echo Request packet detected\n");		
-		saddr.s_addr = inet_addr("255.0.255.1");
-		daddr.s_addr = ip->saddr;
-
-		icmptosend->type = ICMP_ECHOREPLY;
-	}
-
-	else if (icmph->type == ICMP_ECHOREPLY)
-	{
-		printf("Echo Replay packet detected\n");
-		saddr.s_addr = inet_addr("255.0.255.1");
-		daddr.s_addr = ip->daddr;
-	}
-
-	iptosend->ip_src = saddr;
-	iptosend->ip_dst = daddr;
-
-	icmptosend->checksum = 0;
-
-	icmptosend->checksum = calculate_checksum((unsigned short *)(bufferToSend + (iptosend->ip_hl*4)), sizeof(struct icmphdr));
-    memcpy((bufferToSend + (iptosend->ip_hl*4)), icmptosend, sizeof(struct icmphdr));
-
-	send_raw_ip_packet(iptosend);
-
-	printf("Spoofed packet sent.\n");
+	send_raw_ip_packet(iph);
 }
 
-void send_raw_ip_packet(struct ip* ip) {
-    struct sockaddr_in dest_info;
+void spoofUDP(){
+    char buffer[MTU] = { 0 };
+	struct ip* iph = (struct ip*)(buffer);
+    struct udphdr* udph = (struct udphdr *) (buffer + sizeof(struct ip));
+	char *msg = "Spoofed UDP message.";
+	int msglen = (strlen(msg) + 1);
 
-    int enable = 1, sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+	iph->ip_v = 4;
+	iph->ip_hl = 5;
+	iph->ip_ttl = 64;
+	iph->ip_src.s_addr = inet_addr("1.2.3.4");
+	iph->ip_dst.s_addr = inet_addr("10.0.2.15");
+    iph->ip_p = IPPROTO_UDP;
+    iph->ip_len = htons(sizeof(struct ip) + sizeof(struct udphdr) + msglen);
 
-	if (sock == -1)
+    udph->uh_sport = htons(54321);
+   	udph->uh_dport = htons(12345);
+    udph->uh_ulen = htons(sizeof(struct udphdr) + msglen);
+    udph->uh_sum = 0;
+
+	memcpy((buffer + sizeof(struct ip) + sizeof(struct udphdr)), msg, msglen);
+
+	char *pseudogram;
+	struct pseudo_header psh;
+
+	int psize = sizeof(struct pseudo_header) + sizeof(struct udphdr) + strlen(msg);
+    pseudogram = malloc(psize);
+
+    memcpy(pseudogram , (char*) &psh , sizeof (struct pseudo_header));
+    memcpy(pseudogram + sizeof(struct pseudo_header) , udph , sizeof(struct udphdr) + strlen(msg));
+
+	udph->uh_sum = csum( (unsigned short*) pseudogram , psize);
+
+	free(pseudogram);
+
+	send_raw_ip_packet(iph);
+}
+
+void spoofTCP() {
+	char buffer[MTU] = { 0 };
+	struct ip* iph = (struct ip*)(buffer);
+    struct tcphdr* tcph = (struct tcphdr *) (buffer + sizeof(struct ip));
+	char *msg = "Spoofed TCP message.";
+	int msglen = (strlen(msg) + 1);
+
+	iph->ip_v = 4;
+	iph->ip_hl = 5;
+	iph->ip_ttl = 64;
+	iph->ip_src.s_addr = inet_addr("1.2.3.4");
+	iph->ip_dst.s_addr = inet_addr("10.0.2.15");
+    iph->ip_p = IPPROTO_TCP;
+    iph->ip_len = htons(sizeof(struct ip) + tcph->doff*4 + msglen);
+
+	tcph->source = htons(54321);
+	tcph->dest = htons(12345);
+	tcph->seq = htons(rand());
+	tcph->ack_seq = htons(rand());
+	tcph->doff = 5;
+	tcph->th_flags = TH_ACK;
+	tcph->th_urp = 0;
+	tcph->th_sum = calculate_tcp_checksum(iph);
+
+	memcpy((buffer + sizeof(struct ip) + tcph->doff*4 + msglen), msg, msglen);
+
+	send_raw_ip_packet(iph);
+}
+
+unsigned short csum(unsigned short *ptr,int nbytes) {
+    register long sum;
+    unsigned short oddbyte;
+    register short answer;
+
+    sum=0;
+    while(nbytes>1) {
+        sum+=*ptr++;
+        nbytes-=2;
+    }
+    if(nbytes==1) {
+        oddbyte=0;
+        *((u_char*)&oddbyte)=*(u_char*)ptr;
+        sum+=oddbyte;
+    }
+
+    sum = (sum>>16)+(sum & 0xffff);
+    sum = sum + (sum>>16);
+    answer=(short)~sum;
+
+    return(answer);
+}
+
+unsigned short in_cksum(unsigned short *buf, int length){
+	unsigned short *w = buf;
+	int nleft = length;
+	int sum = 0;
+	unsigned short temp = 0;
+
+	/*
+	 * The algorithm uses a 32 bit accumulator (sum), adds
+	 * sequential 16 bit words to it, and at the end, folds back all
+	 * the carry bits from the top 16 bits into the lower 16 bits.
+	 */
+	while (nleft > 1)
+	{
+		sum += *w++;
+		nleft -= 2;
+	}
+
+	/* treat the odd byte at the end, if any */
+	if (nleft == 1)
+	{
+		*(u_char *)(&temp) = *(u_char *)w;
+		sum += temp;
+	}
+
+	/* add back carry outs from top 16 bits to low 16 bits */
+	sum = (sum >> 16) + (sum & 0xffff); // add hi 16 to low 16
+	sum += (sum >> 16);					// add carry
+	return (unsigned short)(~sum);
+}
+
+void send_raw_ip_packet(struct ip *iph) {
+	struct sockaddr_in dest_info;
+	int socketfd = INVALID_SOCKET, enable = 1;
+
+	dest_info.sin_family = AF_INET;
+	dest_info.sin_addr = iph->ip_dst;
+
+	if ((socketfd = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) == INVALID_SOCKET)
 	{
 		perror("socket");
 		exit(errno);
 	}
 
-    if (setsockopt(sock, IPPROTO_IP, IP_HDRINCL, &enable, sizeof(enable)) == -1)
+	if (setsockopt(socketfd, IPPROTO_IP, IP_HDRINCL, &enable, sizeof(int)) == INVALID_SOCKET)
 	{
-		perror("setsockopt");
+		perror("socket");
 		exit(errno);
 	}
 
-    dest_info.sin_family = AF_INET;
-    dest_info.sin_addr = ip->ip_dst;
-
-    if (sendto(sock, ip, ntohs(ip->ip_len), 0, (struct sockaddr *)&dest_info, sizeof(dest_info)) == -1)
+	if (sendto(socketfd, iph, ntohs(iph->ip_len), 0, (struct sockaddr *)&dest_info, sizeof(dest_info)) == INVALID_SOCKET)
 	{
 		perror("sendto");
 		exit(errno);
 	}
 
-    close(sock);
+	close(socketfd);
 }
 
-unsigned short calculate_checksum(unsigned short *paddress, int len) {
-    int nleft = len, sum = 0;
-    unsigned short *w = paddress;
-    unsigned short answer = 0;
+unsigned short calculate_tcp_checksum(struct ip *iph) {
+   struct tcphdr *tcp = (struct tcphdr *)((u_char *)iph + sizeof(struct ip));
 
-    while (nleft > 1)
-    {
-        sum += *w++;
-        nleft -= 2;
-    }
+   int tcp_len = ntohs(iph->ip_len) - sizeof(struct ip);
 
-    if (nleft == 1)
-    {
-        *((unsigned char *)&answer) = *((unsigned char *)w);
-        sum += answer;
-    }
+   /* pseudo tcp header for the checksum computation */
+   struct pseudo_tcp p_tcp;
+   memset(&p_tcp, 0x0, sizeof(struct pseudo_tcp));
 
-    // add back carry outs from top 16 bits to low 16 bits
-    sum = (sum >> 16) + (sum & 0xffff); // add hi 16 to low 16
-    sum += (sum >> 16);                 // add carry
-    answer = ~sum;                      // truncate to 16 bits
+   p_tcp.saddr = iph->ip_src.s_addr;
+   p_tcp.daddr = iph->ip_dst.s_addr;
+   p_tcp.mbz = 0;
+   p_tcp.ptcl = IPPROTO_TCP;
+   p_tcp.tcpl = htons(tcp_len);
+   memcpy(&p_tcp.tcp, tcp, tcp_len);
 
-    return answer;
+   return  (unsigned short) in_cksum((unsigned short *)&p_tcp, tcp_len + 12);
 }
