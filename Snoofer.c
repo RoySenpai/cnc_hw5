@@ -20,7 +20,12 @@ int main() {
 
     pcap_t *handle;
 
-    char dev[] = "enp0s3";
+    // Defualt virtual box interface
+    //char dev[] = "enp0s3";
+
+    // Docker interface, change this to your docker local network.
+    char dev[] = "br-3ec0d042eba1";
+
     char error_buffer[PCAP_ERRBUF_SIZE];
     char filter_exp[] = "icmp";
 
@@ -67,52 +72,38 @@ int main() {
 }
 
 void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
-    struct ethhdr* ethheader = (struct ethhdr*)packet;
     struct iphdr* iph = (struct iphdr*)(packet + sizeof(struct ethhdr));
     struct icmphdr* icmph = (struct icmphdr*)(packet + sizeof(struct ethhdr) + iph->ihl*4);
+    static char sAddr[INET_ADDRSTRLEN] = { 0 }, dAddr[INET_ADDRSTRLEN] = { 0 };
+
+    static int frame = 0;
 
     // Filter non ping packets
     if (icmph->type != ICMP_ECHO)
         return;
 
+    inet_ntop(AF_INET, &(iph->saddr), sAddr, INET_ADDRSTRLEN);
+    inet_ntop(AF_INET, &(iph->daddr), dAddr, INET_ADDRSTRLEN);
+
+    printf("Cought ICMP Echo Request packet (seq = %d).\n",(++frame));
+    printf("Source: {%s}; Destenation: {%s}\n", sAddr, dAddr);
+
     char buffer[1500] = { 0 };
+
+    memcpy(buffer, (packet + sizeof(struct ethhdr)), (header->len - sizeof(struct ethhdr)));
 
     struct iphdr* iph_spoofed = (struct iphdr*)(buffer);
     struct icmphdr* icmph_spoofed = (struct icmphdr*)(buffer + iph->ihl*4);
 
-    int msg_size = ntohs(iph->tot_len) - iph->ihl*4 - sizeof(struct icmphdr);
-    printf("msg_size = %d\n", msg_size);
-
-    if (msg_size > 0)
-    {
-        memcpy
-        (
-            (buffer + iph->ihl*4 + sizeof(struct icmphdr)), 
-            (packet + iph->ihl*4 + sizeof(struct icmphdr)), 
-            msg_size
-        );
-    }
-
-    iph_spoofed->ihl = iph->ihl;
-    iph_spoofed->version = iph->version;
-    iph_spoofed->tos = iph->tos;
-    iph_spoofed->tot_len = iph->tot_len;
-    iph_spoofed->id = iph->id;
-    iph_spoofed->frag_off = iph->frag_off;
-    iph_spoofed->ttl = iph->ttl;
-    iph_spoofed->protocol = iph->protocol;
     iph_spoofed->saddr = iph->daddr;
     iph_spoofed->daddr = iph->saddr;
 
     icmph_spoofed->type = ICMP_ECHOREPLY;
-    icmph_spoofed->code = 0;
-    icmph_spoofed->un.echo.id = icmph->un.echo.id;
-    icmph_spoofed->un.echo.sequence = icmph->un.echo.sequence;
     icmph_spoofed->checksum = 0;
-    icmph_spoofed->checksum = in_cksum((unsigned short *)icmph_spoofed, sizeof(struct icmphdr) + msg_size);
+    icmph_spoofed->checksum = in_cksum((unsigned short *)icmph_spoofed, (header->len - sizeof(struct ethhdr) - iph->ihl*4));
 
     send_raw_ip_packet(iph_spoofed);
-    printf("fake pong sent\n");
+    printf("Spoofed ICMP Echo Replay sent.\n");
 }
 
 unsigned short in_cksum(unsigned short *buf, int length){
