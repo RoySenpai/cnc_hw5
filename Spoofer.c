@@ -27,21 +27,57 @@
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
-#include <time.h>
 
 #define INVALID_SOCKET -1
 #define PACKET_LEN 536
 #define MTU 1500
 
-#define TYPE IPPROTO_TCP
+
+/* IP Header settings */
+
+/* IP version */
+#define P_IP_VERSION	4
+
+/* IP header length in words */
+#define P_IP_HL			5
+
+/* IP Time-To-Live (Short) */
+#define P_IP_TTL		42
+
+/* Source IP Address */
+#define P_IP_SRC		"8.8.8.8"
+
+/* Destenation IP Address */
+#define P_IP_DST		"10.0.2.15"
+
+
+#define P_ICMP_TYPE 	ICMP_ECHO
+#define P_ICMP_CODE		0
+#define P_ICMP_ECHO_ID	1332
+#define P_ICMP_ECHO_SEQ	420
+#define P_ICMP_MSG		"This is a spoofed ICMP message."
+
+#define P_UDP_SPORT		32132
+#define P_UDP_DPORT		12345
+#define P_UDP_MSG		"This is a spoofed UDP message."
+
+#define P_TCP_SPORT		32132
+#define P_TCP_DPORT		12345
+#define P_TCP_SEQ		432525
+#define P_TCP_ACKSEQ	8676752
+#define P_TCP_HL		5
+#define P_TCP_FLGS		(TH_PUSH | TH_ACK)
+#define P_TCP_WIN		1024
+#define P_TCP_URP		0
+#define P_TCP_MSG		"This is a spoofed TCP message."
 
 unsigned short calculate_tcp_checksum(struct ip *iph);
 unsigned short in_cksum(unsigned short *buf, int length);
 unsigned short csum(unsigned short *ptr,int nbytes);
 void send_raw_ip_packet(struct ip *iph);
-void spoofICMP();
-void spoofTCP();
-void spoofUDP();
+void spoofICMP(struct ip *iph);
+void spoofTCP(struct ip *iph);
+void spoofUDP(struct ip *iph);
 
 struct pseudo_tcp
 {
@@ -62,141 +98,263 @@ struct pseudo_header
     u_int16_t udp_length;
 };
 
-int main() {
+int main(int argc, char** args) {
+	struct ip iph;
 
-  	printf("    Spoofer Application;  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky\n"
+  	printf("\n    Spoofer Application;  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky\n"
 		 "This program comes with ABSOLUTELY NO WARRANTY.\n"
 		 "This is free software, and you are welcome to redistribute it\n"
-		 "under certain conditions; see `LICENSE' for details.\n");
-    printf("----------------------------------------------------------\n");
+		 "under certain conditions; see `LICENSE' for details.\n\n");
 
-	switch (TYPE)
+	if (argc != 2)
+    {
+        fprintf(stderr, "[ERROR] Usage: ./Spoofer <icmp or udp or tcp>\n");
+        exit(1);
+    }
+
+	else
 	{
-		case IPPROTO_TCP:
+		memset(&iph, 0, sizeof(struct ip));
+
+		iph.ip_v = P_IP_VERSION;
+		iph.ip_hl = P_IP_HL;
+		iph.ip_ttl = P_IP_TTL;
+		iph.ip_src.s_addr = inet_addr(P_IP_SRC);
+		iph.ip_dst.s_addr = inet_addr(P_IP_DST);
+
+		if (!strcmp(args[1], "tcp"))
 		{
-			printf("Spoofing TCP packet...\n");
-			spoofTCP();
-			break;
+			iph.ip_p = IPPROTO_TCP;
+			printf("[INFO] Spoofing TCP packets...\n\n");
+
+			while (1)
+			{
+				spoofTCP(&iph);
+				sleep(1);
+			}
 		}
 
-		case IPPROTO_UDP:
+		else if (!strcmp(args[1], "udp"))
 		{
-			printf("Spoofing UDP packet...\n");
-			spoofUDP();
-			break;
+			iph.ip_p = IPPROTO_UDP;
+
+			printf("[INFO] Spoofing UDP packets...\n\n");
+
+			while (1)
+			{
+				spoofUDP(&iph);
+				sleep(1);
+			}
 		}
 
-		case IPPROTO_ICMP:
+		else if (!strcmp(args[1], "icmp"))
 		{
-			printf("Spoofing ICMP packet...\n");
-			spoofICMP();
-			break;
+			iph.ip_p = IPPROTO_ICMP;
+
+			printf("[INFO] Spoofing ICMP packets...\n\n");
+
+			while (1)
+			{
+				spoofICMP(&iph);
+				sleep(1);
+			}	
 		}
 
-		default:
+		else
 		{
-			printf("Unsupported protocol.\n");
-			break;
+			fprintf(stderr, "[ERROR] Unknown protocol.\n");
+			exit(1);
 		}
 	}
 
 	return 0;
 }
 
-void spoofICMP() {
-	struct ip *iph = NULL;
+void spoofICMP(struct ip *iph) {
 	struct icmphdr *icmp = NULL;
-	char buffer[MTU] = {0};
-	char *msg = "SHUT UP";
+
+	char *msg = P_ICMP_MSG;
+	char buffer[MTU] = { 0 };
+
 	int msglen = (strlen(msg) + 1);
 
-	memcpy(buffer + sizeof(struct ip) + sizeof(struct icmphdr), msg, msglen);
+	static int seq_num = P_ICMP_ECHO_SEQ;
+	static int counter = 1;
 
-	icmp = (struct icmphdr *)(buffer + sizeof(struct ip));
-	icmp->type = ICMP_ECHO;
-	icmp->code = 0;
-	icmp->un.echo.id = 1332;
-	icmp->un.echo.sequence = 420;
+	memcpy(buffer, iph, iph->ip_hl*4);
+	memcpy((buffer + (iph->ip_hl*4) + sizeof(struct icmphdr)), msg, msglen);
+
+	iph = (struct ip *)buffer;
+	icmp = (struct icmphdr *)(buffer + (iph->ip_hl*4));
+	iph->ip_len = htons((iph->ip_hl*4) + sizeof(struct icmphdr) + msglen);
+
+	icmp->type = P_ICMP_TYPE;
+	icmp->code = P_ICMP_CODE;
+	icmp->un.echo.id = P_ICMP_ECHO_ID;
+	icmp->un.echo.sequence = seq_num++;
 	icmp->checksum = 0;
 	icmp->checksum = in_cksum((unsigned short *)icmp, sizeof(struct icmphdr) + msglen);
 
-	iph = (struct ip *)buffer;
-	iph->ip_v = 4;
-	iph->ip_hl = 5;
-	iph->ip_ttl = 69;
-	iph->ip_src.s_addr = inet_addr("8.8.8.8");
-	iph->ip_dst.s_addr = inet_addr("10.0.2.15");
-	iph->ip_p = IPPROTO_ICMP;
-	iph->ip_len = htons(sizeof(struct ip) + sizeof(struct icmphdr) + msglen + 69);
+	printf("[INFO] Spoofing ICMP packet %d:\n"
+		   "\t[IPv%hhu] SRC={%s}; DST={%s}; HL={%hhu bytes}; TTL={%hhu}\n"
+		   "\t[ICMP] TYPE={%s}; CODE={%hhu}; ID={%hu}; SEQ={%hu}; CHECKSUM={0x%04X}; MSG={%s}\n",
+		   counter,
+		   P_IP_VERSION,
+		   P_IP_SRC,
+		   P_IP_DST,
+		   P_IP_HL * 4,
+		   P_IP_TTL,
+		   (P_ICMP_TYPE == ICMP_ECHO ? "ICMP ECHO":"ICMP ECHO REPLAY"),
+		   P_ICMP_CODE,
+		   P_ICMP_ECHO_ID,
+		   icmp->un.echo.sequence,
+		   icmp->checksum,
+		   P_ICMP_MSG);
 
 	send_raw_ip_packet(iph);
+
+	printf("[INFO] Packet %d sent (%hu bytes).\n\n", counter++, ntohs(iph->ip_len));
 }
 
-void spoofUDP(){
-    char buffer[MTU] = { 0 };
-	struct ip* iph = (struct ip*)(buffer);
-    struct udphdr* udph = (struct udphdr *) (buffer + sizeof(struct ip));
-	char *msg = "Spoofed UDP message.";
-	int msglen = (strlen(msg) + 1);
+void spoofUDP(struct ip *iph){
+	struct udphdr* udph = NULL;
+	struct pseudo_header psh;
 
-	iph->ip_v = 4;
-	iph->ip_hl = 5;
-	iph->ip_ttl = 64;
-	iph->ip_src.s_addr = inet_addr("1.2.3.4");
-	iph->ip_dst.s_addr = inet_addr("10.0.2.15");
-    iph->ip_p = IPPROTO_UDP;
-    iph->ip_len = htons(sizeof(struct ip) + sizeof(struct udphdr) + msglen);
+	char *msg = P_ICMP_MSG, *pseudogram;
+	char buffer[MTU] = { 0 };
 
-    udph->uh_sport = htons(54321);
-   	udph->uh_dport = htons(12345);
+	int msglen = (strlen(msg) + 1), psize;
+
+	static int counter = 1;
+
+	memcpy(buffer, iph, iph->ip_hl*4);
+	memcpy((buffer + (iph->ip_hl*4) + sizeof(struct udphdr)), msg, msglen);
+
+	iph = (struct ip *)buffer;
+	udph = (struct udphdr*)(buffer + (iph->ip_hl*4));
+
+    iph->ip_len = htons((iph->ip_hl*4) + sizeof(struct udphdr) + msglen);
+
+    udph->uh_sport = htons(P_UDP_SPORT);
+   	udph->uh_dport = htons(P_UDP_DPORT);
     udph->uh_ulen = htons(sizeof(struct udphdr) + msglen);
     udph->uh_sum = 0;
 
-	memcpy((buffer + sizeof(struct ip) + sizeof(struct udphdr)), msg, msglen);
-
-	char *pseudogram;
-	struct pseudo_header psh;
-
-	int psize = sizeof(struct pseudo_header) + sizeof(struct udphdr) + strlen(msg);
+	psize = sizeof(struct pseudo_header) + sizeof(struct udphdr) + strlen(msg);
     pseudogram = malloc(psize);
 
-    memcpy(pseudogram , (char*) &psh , sizeof (struct pseudo_header));
-    memcpy(pseudogram + sizeof(struct pseudo_header) , udph , sizeof(struct udphdr) + strlen(msg));
+	if (pseudogram == NULL)
+	{
+		perror("malloc");
+		exit(errno);
+	}
 
-	udph->uh_sum = csum( (unsigned short*) pseudogram , psize);
+    memcpy(pseudogram, ((char*)&psh), sizeof(struct pseudo_header));
+    memcpy((pseudogram + sizeof(struct pseudo_header)), udph, (sizeof(struct udphdr) + strlen(msg)));
+
+	udph->uh_sum = csum(((unsigned short*)pseudogram), psize);
 
 	free(pseudogram);
 
+	printf("[INFO] Spoofing UDP packet %d:\n"
+		   "\t[IPv%hhu] SRC={%s}; DST={%s}; HL={%hhu bytes}; TTL={%hhu}\n"
+		   "\t[UDP] SPORT={%hu}; DPORT={%hu}; CHECKSUM={0x%04X}; MSG={%s}\n",
+		   counter,
+		   P_IP_VERSION,
+		   P_IP_SRC,
+		   P_IP_DST,
+		   (P_IP_HL * 4),
+		   P_IP_TTL,
+		   P_UDP_SPORT,
+		   P_UDP_DPORT,
+		   udph->uh_sum,
+		   P_UDP_MSG
+	);
+
 	send_raw_ip_packet(iph);
+
+	printf("[INFO] Packet %d sent (%hu bytes).\n\n", counter++, ntohs(iph->ip_len));
 }
 
-void spoofTCP() {
+void spoofTCP(struct ip *iph) {
+	struct tcphdr* tcph = NULL;
+
+	char *msg = P_TCP_MSG;
+
 	char buffer[MTU] = { 0 };
-	struct ip* iph = (struct ip*)(buffer);
-    struct tcphdr* tcph = (struct tcphdr *) (buffer + sizeof(struct ip));
-	char *msg = "Spoofed TCP message.";
+
 	int msglen = (strlen(msg) + 1);
 
-	iph->ip_v = 4;
-	iph->ip_hl = 5;
-	iph->ip_ttl = 64;
-	iph->ip_src.s_addr = inet_addr("1.2.3.4");
-	iph->ip_dst.s_addr = inet_addr("10.0.2.15");
-    iph->ip_p = IPPROTO_TCP;
-    iph->ip_len = htons(sizeof(struct ip) + tcph->doff*4 + msglen);
+	static int counter = 1, seq = P_TCP_SEQ, ack_seq = P_TCP_ACKSEQ;
 
-	tcph->source = htons(54321);
-	tcph->dest = htons(12345);
-	tcph->seq = htons(rand());
-	tcph->ack_seq = htons(rand());
-	tcph->doff = 5;
-	tcph->th_flags = TH_ACK;
-	tcph->th_urp = 0;
+	static const char* TCP_flags[6] = {
+        "FIN",
+        "SYN",
+        "RST",
+        "PUSH",
+        "ACK",
+        "URG"
+    };
+
+	memcpy(buffer, iph, iph->ip_hl*4);
+
+	iph = (struct ip *)buffer;
+	tcph = (struct tcphdr *)(buffer + (iph->ip_hl*4));
+
+	if ((P_TCP_FLGS & TH_PUSH) == TH_PUSH)
+		iph->ip_len = htons((iph->ip_hl*4) + (P_TCP_HL*4) + msglen);
+
+	else
+		iph->ip_len = htons((iph->ip_hl*4) + (P_TCP_HL*4));
+
+	tcph->source = htons(P_TCP_SPORT);
+	tcph->dest = htons(P_TCP_DPORT);
+	tcph->seq = htonl(seq++);
+	tcph->ack_seq = htonl(ack_seq++);
+	tcph->doff = P_TCP_HL;
+	tcph->th_flags = P_TCP_FLGS;
+	tcph->th_win = htons(P_TCP_WIN);
+	tcph->th_urp = htons(P_TCP_URP);
+	tcph->th_sum = 0;
 	tcph->th_sum = calculate_tcp_checksum(iph);
 
-	memcpy((buffer + sizeof(struct ip) + tcph->doff*4 + msglen), msg, msglen);
+	if ((P_TCP_FLGS & TH_PUSH) == TH_PUSH)
+		memcpy((buffer + (iph->ip_hl*4) + (P_TCP_HL*4)), msg, msglen);
+
+	printf("[INFO] Spoofing TCP packet %d:\n"
+		   "\t[IPv%hhu] SRC={%s}; DST={%s}; HL={%hhu bytes}; TTL={%hhu}\n"
+		   "\t[TCP] SPORT={%hu}; DPORT={%hu}; SEQ={%u}; ACK_SEQ={%u}; HL={%hu}; FLAGS={",
+		   counter,
+		   P_IP_VERSION,
+		   P_IP_SRC,
+		   P_IP_DST,
+		   (P_IP_HL * 4),
+		   P_IP_TTL,
+		   P_TCP_SPORT,
+		   P_TCP_DPORT,
+		   seq,
+		   ack_seq,
+		   (P_TCP_HL*4)
+	);
+
+
+	for (int i = 0; i < 6; ++i)
+    {
+        if (tcph->th_flags & (1 << i))
+            printf(" %s", TCP_flags[i]);
+    }
+
+	printf(" }; CHECKSUM={0x%04X}; WIN={%hu bytes}; URP={%hu}", tcph->th_sum, P_TCP_WIN, P_TCP_URP);
+
+	if ((P_TCP_FLGS & TH_PUSH) == TH_PUSH)
+		printf("; MSG={%s}\n", P_TCP_MSG);
+	
+	else
+		printf("\n");
 
 	send_raw_ip_packet(iph);
+
+	printf("[INFO] Packet %d sent (%hu bytes).\n\n", counter++, ntohs(iph->ip_len));
 }
 
 unsigned short csum(unsigned short *ptr,int nbytes) {
@@ -296,5 +454,5 @@ unsigned short calculate_tcp_checksum(struct ip *iph) {
    p_tcp.tcpl = htons(tcp_len);
    memcpy(&p_tcp.tcp, tcp, tcp_len);
 
-   return  (unsigned short) in_cksum((unsigned short *)&p_tcp, tcp_len + 12);
+   return ((unsigned short) in_cksum(((unsigned short *)&p_tcp), (tcp_len + 12)));
 }

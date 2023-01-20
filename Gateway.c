@@ -24,39 +24,33 @@
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
-#include <time.h>
 
 #define INVALID_SOCKET -1
+
 #define LISTEN_PORT 15000
 #define SEND_PORT 15001
 
-#define IP_TO_ROOT  "8.8.8.8"
+int main(int argc, char** args) {
+    struct sockaddr_in server_recv, server_snd, client;
 
-int main() {
-    struct sockaddr_in server_recv, server_snd;
-    struct sockaddr_in client;
+    char buf[1500];
+
+    float rnd = 0.0;
+
+    int socketfd_recv = INVALID_SOCKET, socketfd_snd = INVALID_SOCKET, bytes = 0;
 
     unsigned int clientlen = 0;
 
-    char buf[1500];
-    int socketfd_recv = INVALID_SOCKET, socketfd_snd = INVALID_SOCKET, bytes = 0, rnd = 0;
-
-    printf("    Gateway Application;  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky\n"
+    printf("\n    Gateway Application;  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky\n"
             "This program comes with ABSOLUTELY NO WARRANTY.\n"
             "This is free software, and you are welcome to redistribute it\n"
-            "under certain conditions; see `LICENSE' for details.\n");
+            "under certain conditions; see `LICENSE' for details.\n\n");
 
-	if ((socketfd_recv = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET)
-	{
-		perror("socket");
-		exit(errno);
-	}
-
-    if ((socketfd_snd = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET)
-	{
-		perror("socket");
-		exit(errno);
-	}
+    if (argc != 2)
+    {
+        fprintf(stderr, "[ERROR] Usage: ./Gateway <ip address>\n");
+        exit(1);
+    }
 
     memset((char *) &server_recv, 0, sizeof(server_recv));
     memset((char *) &server_snd, 0, sizeof(server_snd));
@@ -67,55 +61,61 @@ int main() {
 
     server_snd.sin_family = AF_INET;
     server_snd.sin_port = htons(SEND_PORT);
-    server_snd.sin_addr.s_addr = inet_addr(IP_TO_ROOT);
 
-	if (bind(socketfd_recv, (struct sockaddr *) &server_recv, sizeof(server_recv)) == INVALID_SOCKET)
+    if (inet_pton(AF_INET, args[1], &server_snd.sin_addr) <= 0)
     {
-        perror("bind");
+        fprintf(stderr, "[ERROR] Invalid IP Address.\n");
         exit(errno);
     }
 
-    printf("Listening on UDP port %d, sending to UDP port %d...\n", LISTEN_PORT, SEND_PORT);
+	if ((socketfd_recv = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET)
+	{
+		perror("[ERROR] socket");
+		exit(errno);
+	}
+
+    if ((socketfd_snd = socket(AF_INET, SOCK_DGRAM, 0)) == INVALID_SOCKET)
+	{
+		perror("[ERROR] socket");
+		exit(errno);
+	}
+
+	if (bind(socketfd_recv, (struct sockaddr *) &server_recv, sizeof(server_recv)) == INVALID_SOCKET)
+    {
+        perror("[ERROR] bind");
+        exit(errno);
+    }
+
+    printf("[INFO] Listening on UDP port %d, sending to IP address %s and UDP port %d...\n", LISTEN_PORT, args[1], SEND_PORT);
+    printf("----------------------------------------------------------\n");
 
     while (1)
     {
         bzero(buf, sizeof(buf));
+        memset((char *) &client, 0, sizeof(client));
         bytes = recvfrom(socketfd_recv, buf, sizeof(buf), 0, (struct sockaddr *) &client, &clientlen);
 
-        printf("Received %d bytes from client.\n", bytes);
+        printf("[INFO] Received %d bytes from client %s:%d.\n", bytes, inet_ntoa(client.sin_addr), LISTEN_PORT);
         
-        rnd = (rand() % 100);
+        rnd = ((float)random())/((float)RAND_MAX);
 
-        switch(rnd)
+        if (rnd > 0.5)
         {
-            case 0 ... 49:
+            if ((bytes = sendto(socketfd_snd, buf, bytes, 0, (struct sockaddr *)&server_snd, sizeof(struct sockaddr))) == INVALID_SOCKET)
             {
-                printf("Packet dropped.\n");
-                break;
+                perror("[ERROR] sendto");
+                exit(errno);
             }
 
-            case 50 ... 99:
-            {
-                printf("Sending packet outside...\n");
-
-                if ((bytes = sendto(socketfd_snd, buf, bytes, 0, (struct sockaddr *)&server_snd, sizeof(struct sockaddr))) == INVALID_SOCKET)
-                {
-                    perror("sendto");
-                    exit(errno);
-                }
-
-                printf("Sent %d bytes to %s.\n", bytes, inet_ntoa(server_snd.sin_addr));
-                break;
-            }
-
-            default:
-                break;
+            printf("[INFO] Sent %d bytes to %s:%d.\n", bytes, args[1], SEND_PORT);
         }
 
+        else
+            printf("[INFO] Packet dropped.\n");
     }
 
-    close(socketfd_recv);
     close(socketfd_snd);
+    close(socketfd_recv);
 
     return 0;
 }

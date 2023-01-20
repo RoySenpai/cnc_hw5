@@ -33,6 +33,8 @@
 #define CAL_HDRLEN 12
 #define CAL_MAXSIZE 8180
 
+#define MAX_DEV_NAME 128
+
 struct calculatorPacket
 {
     uint32_t unixtime;
@@ -50,25 +52,39 @@ struct calculatorPacket
 
 void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
 
-int main() {
+int main(int argc, char** args) {
     struct bpf_program filter;
 
     pcap_t *handle;
 
-    char dev[] = "lo";
-    char error_buffer[PCAP_ERRBUF_SIZE];
-    char filter_exp[] = "tcp";
+    char dev[MAX_DEV_NAME], error_buffer[PCAP_ERRBUF_SIZE], filter_exp[] = "tcp";
 
     bpf_u_int32 subnet_mask, ip;
 
-    printf("    Sniffer Application;  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky\n"
+    printf("\n    Sniffer Application;  Copyright (C) 2023  Roy Simanovich and Yuval Yurzdichinsky\n"
             "This program comes with ABSOLUTELY NO WARRANTY.\n"
             "This is free software, and you are welcome to redistribute it\n"
-            "under certain conditions; see `LICENSE' for details.\n");
+            "under certain conditions; see `LICENSE' for details.\n\n");
+
+    if (argc == 1)
+    {
+        printf("[INFO] Using default network interface device.\n");
+        strcpy(dev,"enp0s3");
+    }
+
+    else if (argc == 2)
+        strcpy(dev,args[1]);
+
+    else
+    {
+        fprintf(stderr, "[ERROR] Invalid arguments.\n");
+        fprintf(stderr, "[ERROR] Usage: ./Sniffer <device name> or ./Sniffer\n");
+        exit(1);
+    }
 
     if (pcap_lookupnet(dev, &ip, &subnet_mask, error_buffer) == -1)
     {
-        printf("Could not get information for device: %s\n", dev);
+        fprintf(stderr, "[ERROR] Could not get information for device: %s\n", dev);
         ip = 0;
         subnet_mask = 0;
     }
@@ -77,21 +93,21 @@ int main() {
 
     if (handle == NULL)
     {
-        printf("Could not open %s - %s\n", dev, error_buffer);
+        fprintf(stderr, "[ERROR] Could not open %s - %s\n", dev, error_buffer);
         exit(1);
     }
     if (pcap_compile(handle, &filter, filter_exp, 0, ip) == -1) 
     {
-        printf("Bad filter - %s\n", pcap_geterr(handle));
+        fprintf(stderr, "[ERROR] Bad filter - %s\n", pcap_geterr(handle));
         exit(1);
     }
     if (pcap_setfilter(handle, &filter) == -1)
     {
-        printf("Error setting filter - %s\n", pcap_geterr(handle));
+        fprintf(stderr, "[ERROR] Error setting filter - %s\n", pcap_geterr(handle));
         exit(1);
     }
 
-    printf("Listening to interface \"%s\" with filter \"%s\"...\n", dev, filter_exp);
+    printf("[INFO] Listening to interface \"%s\" with filter \"%s\"...\n", dev, filter_exp);
     printf("----------------------------------------------------------\n");
 
     pcap_loop(handle, -1, packetSniffer, NULL);                
