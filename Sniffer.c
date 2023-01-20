@@ -29,28 +29,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
-
-#define CAL_HDRLEN 12
-#define CAL_MAXSIZE 8180
-
-#define MAX_DEV_NAME 128
-
-struct calculatorPacket
-{
-    uint32_t unixtime;
-    uint16_t length;
-
-    union
-    {
-        uint16_t flags;
-        uint16_t _:3, c_flag:1, s_flag:1, t_flag:1, status:10;
-    };
-    
-    uint16_t cache;
-    uint16_t __;
-};
-
-void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char *packet);
+#include "net_head.h"
 
 int main(int argc, char** args) {
     struct bpf_program filter;
@@ -243,17 +222,17 @@ void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char 
 
     if ((tcph->th_flags & TH_PUSH) != TH_PUSH)
     {
-        printf("----------------------------------------------------------\n");
+        printf("---------------s-------------------------------------------\n");
         return;
     }
 
     utime = ntohl(packdata->unixtime);
     dlength = ntohs(packdata->length);
-    packdata->flags = ntohs(packdata->flags);
-    c_flag = (((packdata->flags) >> 12) & 1);
-    s_flag = (((packdata->flags) >> 11) & 1);
-    t_flag = (((packdata->flags) >> 10) & 1);
-    scode = packdata->status;
+    packdata->un.flags = ntohs(packdata->un.flags);
+    c_flag = (((packdata->un.flags) >> 12) & 1);
+    s_flag = (((packdata->un.flags) >> 11) & 1);
+    t_flag = (((packdata->un.flags) >> 10) & 1);
+    scode = packdata->un.status;
     cachecontrol = ntohs(packdata->cache);
 
     CalcData = malloc(dlength * sizeof(uint8_t));
@@ -264,7 +243,7 @@ void packetSniffer(u_char *args, const struct pcap_pkthdr *header, const u_char 
         exit(errno);
     }
     
-    memcpy(CalcData, (packet + sizeof(struct ethhdr) + iph->ihl*4 + tcph->doff*4 + CAL_HDRLEN), dlength);
+    memcpy(CalcData, (packet + sizeof(struct ethhdr) + iph->ihl*4 + tcph->doff*4 + sizeof(struct calculatorPacket)), dlength);
 
     tt = utime;
     ts = *localtime(&tt);

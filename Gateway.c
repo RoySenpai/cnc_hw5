@@ -24,11 +24,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
-
-#define INVALID_SOCKET -1
-
-#define LISTEN_PORT 15000
-#define SEND_PORT 15001
+#include "net_head.h"
 
 int main(int argc, char** args) {
     struct sockaddr_in server_recv, server_snd, client;

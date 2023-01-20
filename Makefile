@@ -3,7 +3,7 @@ CFLAGS = -Wall -g
 
 .PHONY: all clean
 
-all: Sniffer Spoofer Gateway Snoofer
+all: Sniffer Spoofer Gateway Snooper
 
 Sniffer: Sniffer.o
 	$(CC) $(CFLAGS) $^ -lpcap -o $@
@@ -11,14 +11,14 @@ Sniffer: Sniffer.o
 Spoofer: Spoofer.o
 	$(CC) $(CFLAGS) $^ -o $@
 
-Snoofer: Snoofer.o
+Snooper: Snooper.o
 	$(CC) $(CFLAGS) $^ -lpcap -o $@
 
 Gateway: Gateway.o
 	$(CC) $(CFLAGS) $^ -o $@
 
-%.o: %.c
+%.o: %.c net_head.h
 	$(CC) $(CFLAGS) -c $<
 
 clean:
-	rm -f *.o Sniffer Spoofer Snoofer Gateway
+	rm -f *.o Sniffer Spoofer Snooper Gateway

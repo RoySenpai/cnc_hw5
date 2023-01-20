@@ -27,76 +27,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
-
-#define INVALID_SOCKET -1
-#define PACKET_LEN 536
-#define MTU 1500
-
-
-/* IP Header settings */
-
-/* IP version */
-#define P_IP_VERSION	4
-
-/* IP header length in words */
-#define P_IP_HL			5
-
-/* IP Time-To-Live (Short) */
-#define P_IP_TTL		42
-
-/* Source IP Address */
-#define P_IP_SRC		"8.8.8.8"
-
-/* Destenation IP Address */
-#define P_IP_DST		"10.0.2.15"
-
-
-#define P_ICMP_TYPE 	ICMP_ECHO
-#define P_ICMP_CODE		0
-#define P_ICMP_ECHO_ID	1332
-#define P_ICMP_ECHO_SEQ	420
-#define P_ICMP_MSG		"This is a spoofed ICMP message."
-
-#define P_UDP_SPORT		32132
-#define P_UDP_DPORT		12345
-#define P_UDP_MSG		"This is a spoofed UDP message."
-
-#define P_TCP_SPORT		32132
-#define P_TCP_DPORT		12345
-#define P_TCP_SEQ		432525
-#define P_TCP_ACKSEQ	8676752
-#define P_TCP_HL		5
-#define P_TCP_FLGS		(TH_PUSH | TH_ACK)
-#define P_TCP_WIN		1024
-#define P_TCP_URP		0
-#define P_TCP_MSG		"This is a spoofed TCP message."
-
-unsigned short calculate_tcp_checksum(struct ip *iph);
-unsigned short in_cksum(unsigned short *buf, int length);
-unsigned short csum(unsigned short *ptr,int nbytes);
-void send_raw_ip_packet(struct ip *iph);
-void spoofICMP(struct ip *iph);
-void spoofTCP(struct ip *iph);
-void spoofUDP(struct ip *iph);
-
-struct pseudo_tcp
-{
-    unsigned saddr, daddr;
-    unsigned char mbz;
-    unsigned char ptcl;
-    unsigned short tcpl;
-    struct tcphdr tcp;
-    char payload[PACKET_LEN];
-};
-
-struct pseudo_header
-{
-    u_int32_t source_address;
-    u_int32_t dest_address;
-    u_int8_t placeholder;
-    u_int8_t protocol;
-    u_int16_t udp_length;
-};
+#include "net_head.h"
 
 int main(int argc, char** args) {
 	struct ip iph;
@@ -218,7 +149,7 @@ void spoofICMP(struct ip *iph) {
 
 void spoofUDP(struct ip *iph){
 	struct udphdr* udph = NULL;
-	struct pseudo_header psh;
+	struct pseudo_udp psh;
 
 	char *msg = P_ICMP_MSG, *pseudogram;
 	char buffer[MTU] = { 0 };
@@ -240,7 +171,7 @@ void spoofUDP(struct ip *iph){
     udph->uh_ulen = htons(sizeof(struct udphdr) + msglen);
     udph->uh_sum = 0;
 
-	psize = sizeof(struct pseudo_header) + sizeof(struct udphdr) + strlen(msg);
+	psize = sizeof(struct pseudo_udp) + sizeof(struct udphdr) + strlen(msg);
     pseudogram = malloc(psize);
 
 	if (pseudogram == NULL)
@@ -249,8 +180,8 @@ void spoofUDP(struct ip *iph){
 		exit(errno);
 	}
 
-    memcpy(pseudogram, ((char*)&psh), sizeof(struct pseudo_header));
-    memcpy((pseudogram + sizeof(struct pseudo_header)), udph, (sizeof(struct udphdr) + strlen(msg)));
+    memcpy(pseudogram, ((char*)&psh), sizeof(struct pseudo_udp));
+    memcpy((pseudogram + sizeof(struct pseudo_udp)), udph, (sizeof(struct udphdr) + strlen(msg)));
 
 	udph->uh_sum = csum(((unsigned short*)pseudogram), psize);
 
@@ -357,7 +288,7 @@ void spoofTCP(struct ip *iph) {
 	printf("[INFO] Packet %d sent (%hu bytes).\n\n", counter++, ntohs(iph->ip_len));
 }
 
-unsigned short csum(unsigned short *ptr,int nbytes) {
+unsigned short csum(unsigned short *ptr, int nbytes) {
     register long sum;
     unsigned short oddbyte;
     register short answer;
